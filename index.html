@@ -36,6 +36,12 @@
 
 <div class="container">
     <div>
+	<h2>Mode de disposition</h2>
+<select id="mode">
+    <option value="centered">Espacement identique (centré)</option>
+    <option value="edge">Écartement E/2 du mur</option>
+</select>
+
         <h2>Paramètres de la pièce</h2>
         Largeur (m) : <input id="width" type="number" step="0.1" value="5"><br>
         Longueur (m) : <input id="length" type="number" step="0.1" value="4"><br>
@@ -47,6 +53,12 @@
         Flux lumineux d’un spot (lm) : <input id="lumens" type="number" value="500"><br>
 
         <button onclick="calculate()">Calculer</button>
+<h2>Éclairement</h2>
+Lux souhaités : <input id="targetLux" type="number" placeholder="ex: 200"><br>
+<button onclick="calculateSpots()">Calculer le nombre de spots</button>
+
+<h3>Lux obtenus</h3>
+<button onclick="calculateLux()">Calculer les lux</button>
 
         <h2>Résultats</h2>
         <div id="results"></div>
@@ -66,73 +78,237 @@ function calculate() {
     const n = parseInt(document.getElementById("spots").value);
     const angle = parseFloat(document.getElementById("angle").value);
     const lumens = parseFloat(document.getElementById("lumens").value);
+    const mode = document.getElementById("mode").value;
 
     const totalLumens = n * lumens;
-
-    // Calcul du rayon du cercle d'éclairage
     const radius = Math.tan((angle / 2) * Math.PI / 180) * height;
 
-    // Placement en grille
     const cols = Math.ceil(Math.sqrt(n));
     const rows = Math.ceil(n / cols);
 
-    const spacingX = width / (cols + 1);
-    const spacingY = length / (rows + 1);
-
+    let spacingX, spacingY, offsetX, offsetY;
     const positions = [];
     let index = 0;
+
+    if (mode === "centered") {
+        spacingX = width / (cols + 1);
+        spacingY = length / (rows + 1);
+        offsetX = spacingX;      // premier spot
+        offsetY = spacingY;
+    } else {
+        spacingX = width / cols;
+        spacingY = length / rows;
+        offsetX = spacingX / 2;  // E/2
+        offsetY = spacingY / 2;
+    }
 
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             if (index >= n) break;
-            positions.push({
-                x: (c + 1) * spacingX,
-                y: (r + 1) * spacingY
-            });
+
+            const x = offsetX + c * spacingX;
+            const y = offsetY + r * spacingY;
+
+            positions.push({ x, y });
             index++;
         }
     }
 
-    draw(width, length, positions, radius);
+    draw(width, length, positions, radius, mode, spacingX, spacingY, offsetX, offsetY);
 
-    document.getElementById("results").innerHTML = `
+    let html = `
         <p><b>Flux lumineux total :</b> ${totalLumens} lm</p>
         <p><b>Rayon de la zone éclairée :</b> ${radius.toFixed(2)} m</p>
+        <p><b>Espacement entre spots (largeur) :</b> ${spacingX.toFixed(2)} m</p>
+        <p><b>Espacement entre spots (longueur) :</b> ${spacingY.toFixed(2)} m</p>
+    `;
+
+    if (mode === "edge") {
+        html += `
+            <p><b>Distance premier spot / mur (largeur) :</b> ${(offsetX).toFixed(2)} m</p>
+            <p><b>Distance premier spot / mur (longueur) :</b> ${(offsetY).toFixed(2)} m</p>
+        `;
+    }
+
+    document.getElementById("results").innerHTML = html;
+}
+
+function calculateSpots() {
+    const width = parseFloat(document.getElementById("width").value);
+    const length = parseFloat(document.getElementById("length").value);
+    const lumens = parseFloat(document.getElementById("lumens").value);
+    const targetLux = parseFloat(document.getElementById("targetLux").value);
+
+    const area = width * length;
+
+    const neededSpots = Math.ceil((targetLux * area) / lumens);
+
+    document.getElementById("results").innerHTML = `
+        <p><b>Surface :</b> ${area.toFixed(2)} m²</p>
+        <p><b>Nombre de spots nécessaires :</b> ${neededSpots}</p>
     `;
 }
 
-function draw(width, length, spots, radius) {
+function calculateLux() {
+    const width = parseFloat(document.getElementById("width").value);
+    const length = parseFloat(document.getElementById("length").value);
+    const lumens = parseFloat(document.getElementById("lumens").value);
+    const n = parseInt(document.getElementById("spots").value);
+
+    const area = width * length;
+    const totalLumens = n * lumens;
+
+    const lux = totalLumens / area;
+
+    document.getElementById("results").innerHTML = `
+        <p><b>Surface :</b> ${area.toFixed(2)} m²</p>
+        <p><b>Flux total :</b> ${totalLumens} lm</p>
+        <p><b>Éclairement obtenu :</b> ${lux.toFixed(1)} lux</p>
+    `;
+}
+
+function draw(width, length, spots, radius, mode, spacingX, spacingY, offsetX, offsetY) {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Échelle
     const scaleX = canvas.width / width;
     const scaleY = canvas.height / length;
 
-    // Dessin de la pièce
+    // Pièce
     ctx.strokeStyle = "#000";
     ctx.strokeRect(0, 0, canvas.width, canvas.height);
 
-    // Dessin des spots
+    // Spots + cercles
     spots.forEach(s => {
         const x = s.x * scaleX;
         const y = s.y * scaleY;
 
-        // Cercle d'éclairage
         ctx.beginPath();
         ctx.strokeStyle = "rgba(255,165,0,0.5)";
         ctx.arc(x, y, radius * scaleX, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Spot
         ctx.beginPath();
         ctx.fillStyle = "black";
         ctx.arc(x, y, 5, 0, Math.PI * 2);
         ctx.fill();
     });
+
+// --- COTES D'ENTRAXE (E) ---
+if (spots.length >= 2) {
+
+    // ----- ENTRAXE EN LARGEUR (toujours en haut) -----
+    const s1 = spots[0];
+    const s2 = spots.find(p => Math.abs(p.y - s1.y) < 1e-3 && p.x > s1.x);
+
+    if (s2) {
+        const x1 = s1.x * scaleX;
+        const x2 = s2.x * scaleX;
+        const y = 20; // toujours en haut
+
+        ctx.strokeStyle = "#00f";
+        ctx.beginPath();
+        ctx.moveTo(x1, y);
+        ctx.lineTo(x2, y);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x1, y - 5);
+        ctx.lineTo(x1, y + 5);
+        ctx.moveTo(x2, y - 5);
+        ctx.lineTo(x2, y + 5);
+        ctx.stroke();
+
+        ctx.fillStyle = "#00f";
+        ctx.font = "12px Arial";
+        ctx.fillText(spacingX.toFixed(2) + " m", (x1 + x2) / 2 - 15, y - 8);
+    }
+
+    // ----- ENTRAXE EN LONGUEUR (toujours à gauche) -----
+    const firstRow = spots.filter(p => Math.abs(p.y - spots[0].y) < 1e-3);
+    const secondRow = spots.filter(p => Math.abs(p.y - spots[0].y) > 1e-3);
+
+    if (firstRow.length && secondRow.length) {
+        const p1 = firstRow[0];
+        const p2 = secondRow[0];
+
+        const x = 20; // toujours à gauche
+        const y1 = p1.y * scaleY;
+        const y2 = p2.y * scaleY;
+
+        ctx.strokeStyle = "#00f";
+        ctx.beginPath();
+        ctx.moveTo(x, y1);
+        ctx.lineTo(x, y2);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x - 5, y1);
+        ctx.lineTo(x + 5, y1);
+        ctx.moveTo(x - 5, y2);
+        ctx.lineTo(x + 5, y2);
+        ctx.stroke();
+
+        ctx.fillStyle = "#00f";
+        ctx.font = "12px Arial";
+        ctx.fillText(spacingY.toFixed(2) + " m", x + 5, (y1 + y2) / 2);
+    }
 }
+
+
+// --- COTES E/2 EN MODE EDGE ---
+if (mode === "edge" && spots.length) {
+
+    const first = spots[0];
+    const xSpot = first.x * scaleX;
+    const ySpot = first.y * scaleY;
+
+    // ----- COTE E/2 EN LARGEUR (toujours en bas) -----
+    const yText = canvas.height - 30;
+
+    ctx.strokeStyle = "#090";
+    ctx.beginPath();
+    ctx.moveTo(0, yText);
+    ctx.lineTo(xSpot, yText);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, yText - 5);
+    ctx.lineTo(0, yText + 5);
+    ctx.moveTo(xSpot, yText - 5);
+    ctx.lineTo(xSpot, yText + 5);
+    ctx.stroke();
+
+    ctx.fillStyle = "#090";
+    ctx.font = "12px Arial";
+    ctx.fillText((offsetX).toFixed(2) + " m", xSpot / 2 - 15, yText - 8);
+
+
+    // ----- COTE E/2 EN LONGUEUR (toujours à droite) -----
+    const xText = canvas.width - 40;
+
+    ctx.strokeStyle = "#090";
+    ctx.beginPath();
+    ctx.moveTo(xText, 0);
+    ctx.lineTo(xText, ySpot);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(xText - 5, 0);
+    ctx.lineTo(xText + 5, 0);
+    ctx.moveTo(xText - 5, ySpot);
+    ctx.lineTo(xText + 5, ySpot);
+    ctx.stroke();
+
+    ctx.fillStyle = "#090";
+    ctx.font = "12px Arial";
+    ctx.fillText((offsetY).toFixed(2) + " m", xText + 5, ySpot / 2);
+}
+
+}
+
 </script>
 
 </body>
