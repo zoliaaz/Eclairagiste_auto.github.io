@@ -226,22 +226,6 @@ function calculateSpots() {
     `;
 }
 
-function calculateLux() {
-    const width = parseFloat(document.getElementById("width").value);
-    const length = parseFloat(document.getElementById("length").value);
-    const lumens = parseFloat(document.getElementById("lumens").value);
-    const n = parseInt(document.getElementById("spots").value);
-
-    const area = width * length;
-    const totalLumens = n * lumens;
-    const lux = totalLumens / area;
-
-    document.getElementById("results").innerHTML = `
-        <p><b>Surface :</b> ${area.toFixed(2)} m²</p>
-        <p><b>Flux total :</b> ${totalLumens} lm</p>
-        <p><b>Éclairement obtenu :</b> ${lux.toFixed(1)} lux</p>
-    `;
-}
 
 function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY) {
     const canvas = document.getElementById("canvas");
