@@ -84,7 +84,13 @@
 </div>
 
 <script>
-// --- Fonction de dessin d'une vraie cote (flèches triangulaires) ---
+
+// --- VARIABLES GLOBALES POUR LE SURVOL ---
+let lastWidth, lastLength, lastSpots, lastRadius, lastSpacingX, lastSpacingY, lastOffsetX, lastOffsetY;
+let lastScale, lastOffsetXCanvas, lastOffsetYCanvas;
+let hoveredSpot = null;
+
+// --- Fonction de dessin d'une vraie cote ---
 function drawDimensionLine(ctx, x1, y1, x2, y2, text, spotRadiusPx = 5) {
     ctx.save();
     ctx.strokeStyle = "red";
@@ -127,10 +133,8 @@ function drawDimensionLine(ctx, x1, y1, x2, y2, text, spotRadiusPx = 5) {
     ctx.font = "12px Arial";
 
     if (Math.abs(dy) < 1e-3) {
-        // horizontale
         ctx.fillText(text, (ax + bx) / 2 - 10, ay - 8);
     } else {
-        // verticale
         ctx.fillText(text, ax - 45, (ay + by) / 2 + 4);
     }
 
@@ -152,43 +156,25 @@ function calculate() {
     const area = width * length;
     const lux = totalLumens / area;
 
-    // --- Calcul grille de base ---
     let cols = Math.ceil(Math.sqrt(n));
     let rows = Math.ceil(n / cols);
 
-    // --- Gestion du nombre de lignes choisi par l'utilisateur ---
     if (userRows === "auto") {
-        // impairs → une seule ligne
         if (n % 2 === 1) {
             rows = 1;
             cols = n;
         }
-        // pairs → on garde la grille équilibrée calculée
     }
+    if (userRows === "1") { rows = 1; cols = n; }
+    if (userRows === "2") { rows = 2; cols = Math.ceil(n / 2); }
+    if (userRows === "3") { rows = 3; cols = Math.ceil(n / 3); }
 
-    if (userRows === "1") {
-        rows = 1;
-        cols = n;
-    }
-
-    if (userRows === "2") {
-        rows = 2;
-        cols = Math.ceil(n / 2);
-    }
-
-    if (userRows === "3") {
-        rows = 3;
-        cols = Math.ceil(n / 3);
-    }
-
-    // --- Orientation automatique ---
     if (length > width) {
-        const temp = cols;
+        const t = cols;
         cols = rows;
-        rows = temp;
+        rows = t;
     }
 
-    // --- Espacements ---
     let spacingX, spacingY, offsetX, offsetY;
 
     if (mode === "centered") {
@@ -203,32 +189,38 @@ function calculate() {
         offsetY = spacingY / 2;
     }
 
-    // --- Placement des spots ---
     const positions = [];
     let index = 0;
 
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             if (index >= n) break;
-
-            const x = offsetX + c * spacingX;
-            const y = offsetY + r * spacingY;
-
-            positions.push({ x, y });
+            positions.push({
+                x: offsetX + c * spacingX,
+                y: offsetY + r * spacingY
+            });
             index++;
         }
     }
 
+    // Stockage global
+    lastWidth = width;
+    lastLength = length;
+    lastSpots = positions;
+    lastRadius = radius;
+    lastSpacingX = spacingX;
+    lastSpacingY = spacingY;
+    lastOffsetX = offsetX;
+    lastOffsetY = offsetY;
+
     draw(width, length, positions, radius, spacingX, spacingY, offsetX, offsetY);
 
-    let html = `
+    document.getElementById("results").innerHTML = `
         <p><b>Surface :</b> ${area.toFixed(2)} m²</p>
         <p><b>Flux lumineux total :</b> ${totalLumens} lm</p>
         <p><b>Rayon de la zone éclairée :</b> ${radius.toFixed(2)} m</p>
         <p><b>Éclairement obtenu :</b> ${lux.toFixed(1)} lux</p>
     `;
-
-    document.getElementById("results").innerHTML = html;
 }
 
 function calculateSpots() {
@@ -246,31 +238,69 @@ function calculateSpots() {
     `;
 }
 
-function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY) {
+function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY, hoveredSpot = null) {
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const scale = Math.min(canvas.width / width, canvas.height / length);
-
     const offsetXCanvas = (canvas.width - width * scale) / 2;
     const offsetYCanvas = (canvas.height - length * scale) / 2;
 
+    // Stockage global
+    lastScale = scale;
+    lastOffsetXCanvas = offsetXCanvas;
+    lastOffsetYCanvas = offsetYCanvas;
+
     ctx.strokeStyle = "#000";
     ctx.strokeRect(offsetXCanvas, offsetYCanvas, width * scale, length * scale);
+
+    // Dessin des zones d'éclairement
+    ctx.globalCompositeOperation = "multiply";
 
     spots.forEach(s => {
         const x = offsetXCanvas + s.x * scale;
         const y = offsetYCanvas + s.y * scale;
 
         ctx.beginPath();
-        ctx.strokeStyle = "rgba(255,165,0,0.5)";
+        ctx.fillStyle = "rgba(255,165,0,0.25)";
         ctx.arc(x, y, radius * scale, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.fill();
+    });
+	
+// --- Highlight du cercle du spot survolé ---
+if (hoveredSpot) {
+    const hx = offsetXCanvas + hoveredSpot.x * scale;
+    const hy = offsetYCanvas + hoveredSpot.y * scale;
+
+    // Aura externe (glow)
+   // ctx.beginPath();
+    //ctx.strokeStyle = "rgba(255, 255, 0, 0.8)";
+   //ctx.lineWidth = 6;
+   //ctx.shadowColor = "rgba(255, 255, 0, 0.9)";
+   //ctx.shadowBlur = 15;
+   //ctx.arc(hx, hy, radius * scale, 0, Math.PI * 2);
+   //ctx.stroke();
+
+    // Contour interne plus fin
+    ctx.beginPath();
+    ctx.strokeStyle = "orange";
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
+    ctx.arc(hx, hy, radius * scale, 0, Math.PI * 2);
+    ctx.stroke();
+}
+
+    ctx.globalCompositeOperation = "source-over";
+
+    // Dessin des spots
+    spots.forEach(s => {
+        const x = offsetXCanvas + s.x * scale;
+        const y = offsetYCanvas + s.y * scale;
 
         ctx.beginPath();
-        ctx.fillStyle = "black";
+        ctx.fillStyle = (hoveredSpot === s) ? "red" : "black";
         ctx.arc(x, y, 5, 0, Math.PI * 2);
         ctx.fill();
     });
@@ -281,28 +311,14 @@ function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY
     const x1 = offsetXCanvas + first.x * scale;
     const y1 = offsetYCanvas + first.y * scale;
 
-    drawDimensionLine(ctx,
-        offsetXCanvas, y1,
-        x1, y1,
-        offsetX.toFixed(2) + " m"
-    );
-
-    drawDimensionLine(ctx,
-        x1, offsetYCanvas,
-        x1, y1,
-        offsetY.toFixed(2) + " m"
-    );
+    drawDimensionLine(ctx, offsetXCanvas, y1, x1, y1, offsetX.toFixed(2) + " m");
+    drawDimensionLine(ctx, x1, offsetYCanvas, x1, y1, offsetY.toFixed(2) + " m");
 
     const sameRow = spots.filter(p => Math.abs(p.y - first.y) < 1e-3);
     if (sameRow.length > 1) {
         const s2 = sameRow[1];
         const x2 = offsetXCanvas + s2.x * scale;
-
-        drawDimensionLine(ctx,
-            x1, y1,
-            x2, y1,
-            spacingX.toFixed(2) + " m"
-        );
+        drawDimensionLine(ctx, x1, y1, x2, y1, spacingX.toFixed(2) + " m");
     }
 
     const row1 = spots.filter(p => Math.abs(p.y - first.y) < 1e-3);
@@ -311,17 +327,36 @@ function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY
     if (row1.length && row2.length) {
         const p1 = row1[0];
         const p2 = row2[0];
-
         const yA = offsetYCanvas + p1.y * scale;
         const yB = offsetYCanvas + p2.y * scale;
-
-        drawDimensionLine(ctx,
-            x1, yA,
-            x1, yB,
-            spacingY.toFixed(2) + " m"
-        );
+        drawDimensionLine(ctx, x1, yA, x1, yB, spacingY.toFixed(2) + " m");
     }
 }
+
+// --- SURVOL GLOBAL (UN SEUL LISTENER) ---
+document.getElementById("canvas").addEventListener("mousemove", function(e) {
+    if (!lastSpots) return;
+
+    const rect = this.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    hoveredSpot = null;
+
+    lastSpots.forEach(s => {
+        const x = lastOffsetXCanvas + s.x * lastScale;
+        const y = lastOffsetYCanvas + s.y * lastScale;
+
+        const dist = Math.sqrt((mouseX - x)**2 + (mouseY - y)**2);
+
+        if (dist < lastRadius * lastScale) {
+            hoveredSpot = s;
+        }
+    });
+
+    draw(lastWidth, lastLength, lastSpots, lastRadius, lastSpacingX, lastSpacingY, lastOffsetX, lastOffsetY, hoveredSpot);
+});
+
 </script>
 
 </body>
