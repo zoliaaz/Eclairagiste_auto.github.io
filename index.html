@@ -256,6 +256,44 @@ function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY
     ctx.strokeStyle = "#000";
     ctx.strokeRect(offsetXCanvas, offsetYCanvas, width * scale, length * scale);
 
+
+// ===========================
+// COTES DE LA PIECE
+// ===========================
+
+ctx.save();
+ctx.strokeStyle = "#0066cc";
+ctx.fillStyle = "#0066cc";
+ctx.lineWidth = 2;
+ctx.font = "16px Arial";
+
+// ===== Mur A (bas) =====
+const margeBas = 18;
+
+drawDimensionLine(
+    ctx,
+    offsetXCanvas + 10,
+    offsetYCanvas + length * scale - margeBas,
+    offsetXCanvas + width * scale - 10,
+    offsetYCanvas + length * scale - margeBas,
+    width.toFixed(2) + " m",
+    0
+);
+
+// ===== Mur B (droite) =====
+const margeDroite = 18;
+
+drawDimensionLine(
+    ctx,
+    offsetXCanvas + width * scale - margeDroite,
+    offsetYCanvas + 10,
+    offsetXCanvas + width * scale - margeDroite,
+    offsetYCanvas + length * scale - 10,
+    length.toFixed(2) + " m",
+    0
+);
+
+ctx.restore();
     // Dessin des zones d'éclairement
     ctx.globalCompositeOperation = "multiply";
 
