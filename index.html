@@ -2,38 +2,23 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Calculateur de disposition de spots</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
-    body {
-        font-family: Arial, sans-serif;
-        margin: 20px;
-        background: #f5f5f5;
-    }
-    h2 { margin-top: 30px; }
-    .container {
-        display: flex;
-        gap: 40px;
-    }
-    #canvasContainer {
-        background: white;
-        padding: 10px;
-        border: 1px solid #ccc;
-    }
-    canvas {
-        background: #fafafa;
-        border: 1px solid #aaa;
-    }
-    input {
-        padding: 5px;
-        margin: 5px 0;
-        width: 120px;
-    }
-    #resultsContainer {
-        margin-top: 20px;
-        padding: 10px;
-        background: #fff;
-        border: 1px solid #ccc;
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    h2 { margin: 20px 0 8px; font-size: 18px; }
+    .container { display: flex; gap: 40px; flex-wrap: wrap; }
+    #canvasContainer { background: #fff; padding: 10px; border: 1px solid #ccc; }
+    canvas { border: 1px solid #aaa; max-width: 100%; }
+    input, select { padding: 5px; margin: 4px 0; width: 130px; }
+    button { padding: 7px 12px; margin-top: 8px; cursor: pointer; }
+    #resultsContainer { margin-top: 15px; padding: 10px; background: #fff; border: 1px solid #ccc; }
+    #resultsContainer p { margin: 4px 0; }
+    .warn { color: #b45309; }
+    .bitem { display: flex; gap: 4px; align-items: center; }
+    .bitem input { width: 250px; }
+    .err { color: #b91c1c; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -42,40 +27,48 @@
 
 <div class="container">
     <div>
+        <div id="params">
+            <h2>Mode de disposition</h2>
+            <select id="mode" style="width:260px">
+                <option value="centered">Espacement identique (centré)</option>
+                <option value="edge">Écartement E/2 du mur</option>
+            </select>
 
-        <h2>Mode de disposition</h2>
-        <select id="mode">
-            <option value="centered">Espacement identique (centré)</option>
-            <option value="edge">Écartement E/2 du mur</option>
-        </select>
+            <h2>Paramètres de la pièce</h2>
+            Mur A (m) : <input id="width" type="number" step="0.01" value="5"><br>
+            Mur B (m) : <input id="length" type="number" step="0.01" value="4"><br>
+            Hauteur plafond (m) : <input id="height" type="number" step="0.01" value="2.5"><br>
+            Plan de travail (m) : <input id="workplane" type="number" step="0.01" value="0"><br>
 
-        <h2>Paramètres de la pièce</h2>
-        Mur A (m) : <input id="width" type="number" step="0.01" value="5"><br>
-        Mur B (m) : <input id="length" type="number" step="0.01" value="4"><br>
-        Hauteur (m) : <input id="height" type="number" step="0.01" value="2.5"><br>
-
-        <h2>Paramètres des spots</h2>
-        Nombre de spots : <input id="spots" type="number" value="6"><br>
-        Angle de diffusion (°) : <input id="angle" type="number" value="60"><br>
-        Flux lumineux d’un spot (lm) : <input id="lumens" type="number" value="500"><br>
-        Nombre de ligne :
-        <select id="userRows">
-            <option value="auto">Automatique</option>
-            <option value="1">1 ligne</option>
-            <option value="2">2 lignes</option>
-            <option value="3">3 lignes</option>
-        </select>
-        <button onclick="calculate()">Calculer</button>
+            <h2>Paramètres des spots</h2>
+            Nombre de spots : <input id="spots" type="number" min="1" value="6"><br>
+            Angle de diffusion (°) : <input id="angle" type="number" value="60"><br>
+            Flux d'un spot (lm) : <input id="lumens" type="number" value="500"><br>
+            Nombre de lignes :
+            <select id="userRows">
+                <option value="auto">Automatique</option>
+                <option value="1">1 ligne</option>
+                <option value="2">2 lignes</option>
+                <option value="3">3 lignes</option>
+            </select><br>
+            <label><input type="checkbox" id="showHeat" checked style="width:auto"> Carte des lux au sol</label><br>
+            <button onclick="calculate()">Calculer</button>
+        </div>
 
         <h2>Éclairement</h2>
         Lux souhaités : <input id="targetLux" type="number" placeholder="ex: 200"><br>
         <button onclick="calculateSpots()">Calculer le nombre de spots</button>
 
+        <h2>Panier du rapport</h2>
+        <button onclick="addCurrent()">Ajouter cette configuration</button>
+        <button onclick="addVariants()">Ajouter toutes les variantes</button>
+        <div id="basket"></div>
+        <button onclick="exportPDF()" style="margin-top:12px">Exporter le rapport PDF</button>
     </div>
 
     <div id="canvasContainer">
         <h2>Visualisation</h2>
-        <canvas id="canvas" width="500" height="400"></canvas>
+        <canvas id="canvas"></canvas>
         <div id="resultsContainer">
             <h2>Résultats</h2>
             <div id="results"></div>
@@ -84,143 +77,283 @@
 </div>
 
 <script>
+const PLAN_W = 500, CW = 600, CH = 400;
+let mouse = null, heatCache = null;
+let lastLay = null, lastRadius = 0, lastView = null, hovered = null;
 
-// --- VARIABLES GLOBALES POUR LE SURVOL ---
-let lastWidth, lastLength, lastSpots, lastRadius, lastSpacingX, lastSpacingY, lastOffsetX, lastOffsetY;
-let lastScale, lastOffsetXCanvas, lastOffsetYCanvas;
-let hoveredSpot = null;
+// ---------- Lecture et validation ----------
+function readParams() {
+    const g = id => parseFloat(document.getElementById(id).value);
+    const p = {
+        W: g("width"), L: g("length"), H: g("height"),
+        hp: g("workplane") || 0,
+        n: parseInt(document.getElementById("spots").value),
+        angle: g("angle"), lm: g("lumens"),
+        mode: document.getElementById("mode").value,
+        rows: document.getElementById("userRows").value,
+        heat: document.getElementById("showHeat").checked
+    };
+    const err = [];
+    if (!(p.W > 0 && p.L > 0)) err.push("Dimensions de la pièce invalides.");
+    if (!(p.n >= 1)) err.push("Nombre de spots invalide.");
+    if (!(p.angle > 0 && p.angle < 180)) err.push("Angle de diffusion invalide (0-180°).");
+    if (!(p.lm > 0)) err.push("Flux lumineux invalide.");
+    if (!(p.H > p.hp)) err.push("La hauteur doit être supérieure au plan de travail.");
+    if (err.length) {
+        document.getElementById("results").innerHTML = err.map(e => `<p class="err">${e}</p>`).join("");
+        return null;
+    }
+    p.radius = Math.tan(p.angle / 2 * Math.PI / 180) * (p.H - p.hp);
+    return p;
+}
 
-// --- Fonction de dessin d'une vraie cote ---
-function drawDimensionLine(ctx, x1, y1, x2, y2, text, spotRadiusPx = 5) {
+// ---------- Calcul de la disposition ----------
+// "lines" = nombre de lignes parallèles au mur le plus long
+// Répartition symétrique des spots par ligne (ex. 5 spots sur 3 lignes : 2-1-2)
+function lineCounts(n, lines) {
+    const cnt = Array(lines).fill(Math.floor(n / lines));
+    let extra = n % lines;
+    const pick = [];
+    if (extra % 2 === 1 && lines % 2 === 1) { pick.push((lines - 1) / 2); extra--; }
+    for (let i = 0; i < Math.floor(extra / 2); i++) pick.push(i, lines - 1 - i);
+    if (extra % 2 === 1) pick.push(Math.floor(extra / 2));
+    pick.forEach(i => cnt[i]++);
+    return cnt;
+}
+
+// "lines" = nombre de lignes parallèles au mur le plus long
+function layout(p, lines, mode) {
+    lines = Math.min(lines, p.n);
+    const alongX = p.W >= p.L;
+    const lenA = alongX ? p.W : p.L, lenC = alongX ? p.L : p.W;
+    const counts = lineCounts(p.n, lines), maxA = Math.max(...counts);
+    const k = mode === "centered" ? 1 : 0;
+    const pA = lenA / (maxA + k), pC = lenC / (lines + k);
+    const oC = mode === "centered" ? pC : pC / 2;
+    const pts = [];
+    counts.forEach((m, i) => {
+        for (let j = 0; j < m; j++) {
+            const a = lenA / 2 + (j - (m - 1) / 2) * pA, c = oC + i * pC;
+            pts.push(alongX ? { x: a, y: c } : { x: c, y: a });
+        }
+    });
+    pts.sort((u, v) => Math.abs(u.y - v.y) > 1e-9 ? u.y - v.y : u.x - v.x);
+    return { W: p.W, L: p.L, n: p.n, pts, counts, mode,
+        cols: alongX ? maxA : lines, rows: alongX ? lines : maxA,
+        spX: alongX ? pA : pC, spY: alongX ? pC : pA, offX: pts[0].x, offY: pts[0].y,
+        radius: p.radius, lm: p.lm, h: p.H - p.hp, half: p.angle / 2 * Math.PI / 180, heat: p.heat };
+}
+
+function autoLines(p) {
+    let best = 1, bestScore = Infinity;
+    [1, 2, 3].forEach(l => {
+        if (l > p.n || p.n % l !== 0) return;
+        const lay = layout(p, l, p.mode);
+        const score = Math.abs(lay.spX - lay.spY);
+        if (score < bestScore) { bestScore = score; best = l; }
+    });
+    return best;
+}
+
+function currentLines(p) { return p.rows === "auto" ? autoLines(p) : parseInt(p.rows); }
+
+// ---------- Infos textuelles (écran + PDF) ----------
+function info(p, lay) {
+    const f = v => v.toFixed(2);
+    const area = p.W * p.L, total = p.n * p.lm;
+    const rows = [
+        ["Surface", `${f(area)} m²`],
+        ["Flux lumineux total", `${total} lm`],
+        ["Rayon de la zone éclairée", `${f(p.radius)} m`],
+        ["Éclairement obtenu", `${(total / area).toFixed(1)} lux`]
+    ];
+    const warns = [];
+    if (Math.max(lay.cols > 1 ? lay.spX : 0, lay.rows > 1 ? lay.spY : 0) > 2 * p.radius)
+        warns.push("Les zones éclairées ne sont pas jointives (entraxe > 2 x rayon) : risque de zones sombres.");
+    return { rows, warns };
+}
+
+function showResults(p, lay) {
+    const { rows, warns } = info(p, lay);
+    document.getElementById("results").innerHTML =
+        rows.map(([k, v]) => `<p><b>${k} :</b> ${v}</p>`).join("") +
+        warns.map(w => `<p class="warn">⚠ ${w}</p>`).join("");
+}
+
+// ---------- Dessin ----------
+function drawDimensionLine(ctx, x1, y1, x2, y2, text, spotRadiusPx = 5, color = "red") {
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+    if (len < 12) return;
     ctx.save();
-    ctx.strokeStyle = "red";
-    ctx.fillStyle = "red";
-    ctx.lineWidth = 1;
-
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.sqrt(dx*dx + dy*dy);
-
-    const ux = dx / len;
-    const uy = dy / len;
-
-    const ax = x1 + ux * spotRadiusPx;
-    const ay = y1 + uy * spotRadiusPx;
-    const bx = x2 - ux * spotRadiusPx;
-    const by = y2 - uy * spotRadiusPx;
-
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-
-    function arrow(px, py, tx, ty) {
-        const angle = Math.atan2(ty - py, tx - px);
-        const size = 8;
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(px + Math.cos(angle + Math.PI/6) * size,
-                   py + Math.sin(angle + Math.PI/6) * size);
-        ctx.lineTo(px + Math.cos(angle - Math.PI/6) * size,
-                   py + Math.sin(angle - Math.PI/6) * size);
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    arrow(ax, ay, bx, by);
-    arrow(bx, by, ax, ay);
-
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1;
+    const ux = dx / len, uy = dy / len;
+    const ax = x1 + ux * spotRadiusPx, ay = y1 + uy * spotRadiusPx;
+    const bx = x2 - ux * spotRadiusPx, by = y2 - uy * spotRadiusPx;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    const arrow = (px, py, tx, ty) => {
+        const a = Math.atan2(ty - py, tx - px), s = 8;
+        ctx.beginPath(); ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(a + Math.PI / 6) * s, py + Math.sin(a + Math.PI / 6) * s);
+        ctx.lineTo(px + Math.cos(a - Math.PI / 6) * s, py + Math.sin(a - Math.PI / 6) * s);
+        ctx.closePath(); ctx.fill();
+    };
+    arrow(ax, ay, bx, by); arrow(bx, by, ax, ay);
     ctx.font = "12px Arial";
-
-    if (Math.abs(dy) < 1e-3) {
-        ctx.fillText(text, (ax + bx) / 2 - 10, ay - 8);
-    } else {
-        ctx.fillText(text, ax - 45, (ay + by) / 2 + 4);
-    }
-
+    const w = ctx.measureText(text).width;
+    let tx, ty;
+    if (Math.abs(dy) < 1e-3) { tx = Math.max(2, (ax + bx) / 2 - w / 2); ty = ay - 8; }
+    else { tx = ax - 6 - w; ty = (ay + by) / 2 + 4; if (tx < 2) tx = ax + 6; }
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.strokeText(text, tx, ty);
+    ctx.fillText(text, tx, ty);
     ctx.restore();
 }
 
-function calculate() {
-    const width = parseFloat(document.getElementById("width").value);
-    const length = parseFloat(document.getElementById("length").value);
-    const height = parseFloat(document.getElementById("height").value);
-    const n = parseInt(document.getElementById("spots").value);
-    const angle = parseFloat(document.getElementById("angle").value);
-    const lumens = parseFloat(document.getElementById("lumens").value);
-    const mode = document.getElementById("mode").value;
-    const userRows = document.getElementById("userRows").value;
-
-    const totalLumens = n * lumens;
-    const radius = Math.tan((angle / 2) * Math.PI / 180) * height;
-    const area = width * length;
-    const lux = totalLumens / area;
-
-    let cols = Math.ceil(Math.sqrt(n));
-    let rows = Math.ceil(n / cols);
-
-    if (userRows === "auto") {
-        if (n % 2 === 1) {
-            rows = 1;
-            cols = n;
-        }
+// Éclairement au sol (lux) en un point : cône à intensité uniforme, E = I.cos³α / h²
+function luxAt(lay, x, y) {
+    const I = lay.lm / (2 * Math.PI * (1 - Math.cos(lay.half)));
+    let e = 0;
+    for (const s of lay.pts) {
+        const d = Math.hypot(x - s.x, y - s.y);
+        if (d <= lay.radius) { const c = lay.h / Math.hypot(d, lay.h); e += I * c * c * c / (lay.h * lay.h); }
     }
-    if (userRows === "1") { rows = 1; cols = n; }
-    if (userRows === "2") { rows = 2; cols = Math.ceil(n / 2); }
-    if (userRows === "3") { rows = 3; cols = Math.ceil(n / 3); }
+    return e;
+}
 
-    if (length > width) {
-        const t = cols;
-        cols = rows;
-        rows = t;
+const ORANGE = [[255,232,180],[255,196,100],[245,140,30],[200,80,0],[120,35,0]];
+function heatColor(t) {
+    const x = Math.min(Math.max(t, 0), 1) * (ORANGE.length - 1);
+    const i = Math.min(Math.floor(x), ORANGE.length - 2), f = x - i;
+    return ORANGE[i].map((v, k) => Math.round(v + (ORANGE[i + 1][k] - v) * f));
+}
+
+function getHeat(lay) {
+    const key = [lay.W, lay.L, lay.n, lay.spX, lay.spY, lay.offX, lay.offY, lay.radius, lay.lm, lay.h].join();
+    if (heatCache && heatCache.key === key) return heatCache;
+    const wide = lay.W >= lay.L, N = 400;
+    const nx = wide ? N : Math.max(8, Math.round(N * lay.W / lay.L));
+    const ny = wide ? Math.max(8, Math.round(N * lay.L / lay.W)) : N;
+    const vals = new Float32Array(nx * ny);
+    let min = Infinity, max = 0, sum = 0;
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const v = luxAt(lay, (i + .5) / nx * lay.W, (j + .5) / ny * lay.L);
+        vals[j * nx + i] = v; sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
     }
+    const c = document.createElement("canvas"); c.width = nx; c.height = ny;
+    const cx = c.getContext("2d"), img = cx.createImageData(nx, ny);
+    for (let q = 0; q < vals.length; q++) {
+        if (vals[q] <= 0) continue;
+        img.data.set([...heatColor(vals[q] / max), 210], q * 4);
+    }
+    cx.putImageData(img, 0, 0);
+    heatCache = { key, canvas: c, min, max, avg: sum / vals.length };
+    return heatCache;
+}
 
-    let spacingX, spacingY, offsetX, offsetY;
+// Légende sur le côté du plan : éclairement au sol en lux
+function drawLegend(ctx, heat) {
+    const x = PLAN_W + 18, top = 42, bottom = 340, w = 18;
+    const g = ctx.createLinearGradient(0, top, 0, bottom);
+    ORANGE.forEach((c, i) => g.addColorStop(1 - i / (ORANGE.length - 1), `rgba(${c},0.82)`));
+    ctx.fillStyle = "#000"; ctx.font = "bold 11px Arial";
+    ctx.fillText("Éclairement", x, 18); ctx.fillText("au sol (lux)", x, 31);
+    ctx.fillStyle = g; ctx.fillRect(x, top, w, bottom - top);
+    ctx.strokeStyle = "#666"; ctx.lineWidth = 1; ctx.strokeRect(x, top, w, bottom - top);
+    ctx.fillStyle = "#000"; ctx.font = "11px Arial";
+    for (let i = 0; i <= 4; i++) {
+        const y = top + (bottom - top) * i / 4;
+        ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w + 4, y); ctx.stroke();
+        ctx.fillText(Math.round(heat.max * (1 - i / 4)) + " lux", x + w + 8, y + 4);
+    }
+}
 
-    if (mode === "centered") {
-        spacingX = width / (cols + 1);
-        spacingY = length / (rows + 1);
-        offsetX = spacingX;
-        offsetY = spacingY;
+function draw(cv, lay, radius, hov, dpr = window.devicePixelRatio || 1, mouse = null) {
+    cv.width = CW * dpr; cv.height = CH * dpr;
+    cv.style.width = CW + "px"; cv.style.height = CH + "px";
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#fafafa"; ctx.fillRect(0, 0, CW, CH);
+
+    const { W, L, pts } = lay;
+    const sc = Math.min(PLAN_W / W, CH / L);
+    const ox = (PLAN_W - W * sc) / 2, oy = (CH - L * sc) / 2;
+
+    // Carte des lux au sol (sinon zones orange)
+    let heat = null;
+    if (lay.heat) {
+        heat = getHeat(lay);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(heat.canvas, ox, oy, W * sc, L * sc);
     } else {
-        spacingX = width / cols;
-        spacingY = length / rows;
-        offsetX = spacingX / 2;
-        offsetY = spacingY / 2;
+        ctx.globalCompositeOperation = "multiply";
+        pts.forEach(s => {
+            ctx.beginPath(); ctx.fillStyle = "rgba(255,165,0,0.25)";
+            ctx.arc(ox + s.x * sc, oy + s.y * sc, radius * sc, 0, Math.PI * 2); ctx.fill();
+        });
+        ctx.globalCompositeOperation = "source-over";
+    }
+    if (hov) {
+        ctx.beginPath(); ctx.strokeStyle = heat ? "#111" : "orange"; ctx.lineWidth = 1.5;
+        if (heat) ctx.setLineDash([5, 3]);
+        ctx.arc(ox + hov.x * sc, oy + hov.y * sc, radius * sc, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
     }
 
-    const positions = [];
-    let index = 0;
+    ctx.strokeStyle = "#000"; ctx.lineWidth = 1;
+    ctx.strokeRect(ox, oy, W * sc, L * sc);
 
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            if (index >= n) break;
-            positions.push({
-                x: offsetX + c * spacingX,
-                y: offsetY + r * spacingY
-            });
-            index++;
-        }
+    // Cotes de la pièce
+    drawDimensionLine(ctx, ox + 10, oy + L * sc - 18, ox + W * sc - 10, oy + L * sc - 18, "A = " + W.toFixed(2) + " m", 0, "#0044aa");
+    drawDimensionLine(ctx, ox + W * sc - 18, oy + 10, ox + W * sc - 18, oy + L * sc - 10, "B = " + L.toFixed(2) + " m", 0, "#0044aa");
+
+    // Spots
+    pts.forEach(s => {
+        ctx.beginPath(); ctx.fillStyle = (hov === s) ? "red" : "black";
+        ctx.arc(ox + s.x * sc, oy + s.y * sc, 5, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Cotes des spots
+    const first = pts[0];
+    const hn = pts.find(q => Math.abs(q.y - first.y) < 1e-6 && q.x > first.x + 1e-6);
+    const vn = pts.find(q => q.y > first.y + 1e-6);
+    const ex = hn ? hn.x - first.x : lay.spX, ey = vn ? vn.y - first.y : lay.spY;
+    const same = Math.abs(ex - ey) < 0.005;
+    const nX = same ? "E" : "Ex", nY = same ? "E" : "Ey";
+    const lab = (v, e, n) => (Math.abs(v - e / 2) < 0.005 ? n + "/2 = " : Math.abs(v - e) < 0.005 ? n + " = " : "") + v.toFixed(2) + " m";
+    const x1 = ox + first.x * sc, y1 = oy + first.y * sc;
+    drawDimensionLine(ctx, ox, y1, x1, y1, lab(first.x, ex, nX));
+    drawDimensionLine(ctx, x1, oy, x1, y1, lab(first.y, ey, nY));
+    if (hn) drawDimensionLine(ctx, x1, y1, ox + hn.x * sc, y1, `${nX} = ${ex.toFixed(2)} m`);
+    if (vn) drawDimensionLine(ctx, x1, y1, x1, oy + vn.y * sc, `${nY} = ${ey.toFixed(2)} m`);
+
+    if (heat) drawLegend(ctx, heat);
+
+    // Infobulle : lux au point survolé
+    if (heat && mouse && mouse.x >= ox && mouse.x <= ox + W * sc && mouse.y >= oy && mouse.y <= oy + L * sc) {
+        const txt = luxAt(lay, (mouse.x - ox) / sc, (mouse.y - oy) / sc).toFixed(0) + " lux";
+        ctx.font = "bold 13px Arial";
+        const w = ctx.measureText(txt).width + 12;
+        let tx = mouse.x + 12, ty = mouse.y - 28;
+        if (tx + w > PLAN_W) tx = mouse.x - w - 12;
+        if (ty < 0) ty = mouse.y + 14;
+        ctx.beginPath(); ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5;
+        ctx.arc(mouse.x, mouse.y, 3, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.fillRect(tx, ty, w, 20);
+        ctx.strokeStyle = "#333"; ctx.strokeRect(tx, ty, w, 20);
+        ctx.fillStyle = "#000"; ctx.fillText(txt, tx + 6, ty + 14);
     }
+    return { sc, ox, oy };
+}
 
-    // Stockage global
-    lastWidth = width;
-    lastLength = length;
-    lastSpots = positions;
-    lastRadius = radius;
-    lastSpacingX = spacingX;
-    lastSpacingY = spacingY;
-    lastOffsetX = offsetX;
-    lastOffsetY = offsetY;
-
-    draw(width, length, positions, radius, spacingX, spacingY, offsetX, offsetY);
-
-    document.getElementById("results").innerHTML = `
-        <p><b>Surface :</b> ${area.toFixed(2)} m²</p>
-        <p><b>Flux lumineux total :</b> ${totalLumens} lm</p>
-        <p><b>Rayon de la zone éclairée :</b> ${radius.toFixed(2)} m</p>
-        <p><b>Éclairement obtenu :</b> ${lux.toFixed(1)} lux</p>
-    `;
+// ---------- Actions ----------
+function calculate() {
+    const p = readParams(); if (!p) return;
+    lastLay = layout(p, currentLines(p), p.mode);
+    lastRadius = p.radius;
+    hovered = null; mouse = null;
+    lastView = draw(document.getElementById("canvas"), lastLay, lastRadius, null);
+    showResults(p, lastLay);
 }
 
 function calculateSpots() {
@@ -228,174 +361,138 @@ function calculateSpots() {
     const length = parseFloat(document.getElementById("length").value);
     const lumens = parseFloat(document.getElementById("lumens").value);
     const targetLux = parseFloat(document.getElementById("targetLux").value);
-
+    if (!(width > 0 && length > 0 && lumens > 0 && targetLux > 0)) {
+        document.getElementById("results").innerHTML = '<p class="err">Renseignez les dimensions, le flux et les lux souhaités.</p>';
+        return;
+    }
     const area = width * length;
-    const neededSpots = Math.ceil((targetLux * area) / lumens);
-
+    const needed = Math.ceil(targetLux * area / lumens);
     document.getElementById("results").innerHTML = `
         <p><b>Surface :</b> ${area.toFixed(2)} m²</p>
-        <p><b>Nombre de spots nécessaires :</b> ${neededSpots}</p>
-    `;
+        <p><b>Nombre de spots nécessaires :</b> ${needed}</p>
+        <p><b>Éclairement obtenu avec ${needed} spots :</b> ${(needed * lumens / area).toFixed(1)} lux</p>`;
+    document.getElementById("spots").value = needed;
 }
 
-function draw(width, length, spots, radius, spacingX, spacingY, offsetX, offsetY, hoveredSpot = null) {
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
+// ---------- Panier ----------
+let basket = [];
+try { basket = JSON.parse(localStorage.getItem("spotsBasket") || "[]"); } catch (e) {}
+const esc = t => String(t).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const modeLabel = m => m === "centered" ? "centré" : "E/2";
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const scale = Math.min(canvas.width / width, canvas.height / length);
-    const offsetXCanvas = (canvas.width - width * scale) / 2;
-    const offsetYCanvas = (canvas.height - length * scale) / 2;
-
-    // Stockage global
-    lastScale = scale;
-    lastOffsetXCanvas = offsetXCanvas;
-    lastOffsetYCanvas = offsetYCanvas;
-
-    ctx.strokeStyle = "#000";
-    ctx.strokeRect(offsetXCanvas, offsetYCanvas, width * scale, length * scale);
-
-
-// ===========================
-// COTES DE LA PIECE
-// ===========================
-
-ctx.save();
-ctx.strokeStyle = "#0066cc";
-ctx.fillStyle = "#0066cc";
-ctx.lineWidth = 2;
-ctx.font = "16px Arial";
-
-// ===== Mur A (bas) =====
-const margeBas = 18;
-
-drawDimensionLine(
-    ctx,
-    offsetXCanvas + 10,
-    offsetYCanvas + length * scale - margeBas,
-    offsetXCanvas + width * scale - 10,
-    offsetYCanvas + length * scale - margeBas,
-    width.toFixed(2) + " m",
-    0
-);
-
-// ===== Mur B (droite) =====
-const margeDroite = 18;
-
-drawDimensionLine(
-    ctx,
-    offsetXCanvas + width * scale - margeDroite,
-    offsetYCanvas + 10,
-    offsetXCanvas + width * scale - margeDroite,
-    offsetYCanvas + length * scale - 10,
-    length.toFixed(2) + " m",
-    0
-);
-
-ctx.restore();
-    // Dessin des zones d'éclairement
-    ctx.globalCompositeOperation = "multiply";
-
-    spots.forEach(s => {
-        const x = offsetXCanvas + s.x * scale;
-        const y = offsetYCanvas + s.y * scale;
-
-        ctx.beginPath();
-        ctx.fillStyle = "rgba(255,165,0,0.25)";
-        ctx.arc(x, y, radius * scale, 0, Math.PI * 2);
-        ctx.fill();
-    });
-	
-// --- Highlight du cercle du spot survolé ---
-if (hoveredSpot) {
-    const hx = offsetXCanvas + hoveredSpot.x * scale;
-    const hy = offsetYCanvas + hoveredSpot.y * scale;
-
-    // Aura externe (glow)
-   // ctx.beginPath();
-    //ctx.strokeStyle = "rgba(255, 255, 0, 0.8)";
-   //ctx.lineWidth = 6;
-   //ctx.shadowColor = "rgba(255, 255, 0, 0.9)";
-   //ctx.shadowBlur = 15;
-   //ctx.arc(hx, hy, radius * scale, 0, Math.PI * 2);
-   //ctx.stroke();
-
-    // Contour interne plus fin
-    ctx.beginPath();
-    ctx.strokeStyle = "orange";
-    ctx.lineWidth = 2;
-    ctx.shadowBlur = 0;
-    ctx.arc(hx, hy, radius * scale, 0, Math.PI * 2);
-    ctx.stroke();
+function saveBasket() {
+    try { localStorage.setItem("spotsBasket", JSON.stringify(basket)); } catch (e) {}
+    renderBasket();
 }
-
-    ctx.globalCompositeOperation = "source-over";
-
-    // Dessin des spots
-    spots.forEach(s => {
-        const x = offsetXCanvas + s.x * scale;
-        const y = offsetYCanvas + s.y * scale;
-
-        ctx.beginPath();
-        ctx.fillStyle = (hoveredSpot === s) ? "red" : "black";
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
-        ctx.fill();
-    });
-
-    if (!spots.length) return;
-
-    const first = spots[0];
-    const x1 = offsetXCanvas + first.x * scale;
-    const y1 = offsetYCanvas + first.y * scale;
-
-    drawDimensionLine(ctx, offsetXCanvas, y1, x1, y1, offsetX.toFixed(2) + " m");
-    drawDimensionLine(ctx, x1, offsetYCanvas, x1, y1, offsetY.toFixed(2) + " m");
-
-    const sameRow = spots.filter(p => Math.abs(p.y - first.y) < 1e-3);
-    if (sameRow.length > 1) {
-        const s2 = sameRow[1];
-        const x2 = offsetXCanvas + s2.x * scale;
-        drawDimensionLine(ctx, x1, y1, x2, y1, spacingX.toFixed(2) + " m");
+function addToBasket(p, lines) {
+    basket.push({ name: `Config ${basket.length + 1} : ${p.n} spots, ${lines} ligne${lines > 1 ? "s" : ""}${lineCounts(p.n, lines).some(c => c !== lineCounts(p.n, lines)[0]) ? " (" + lineCounts(p.n, lines).join("-") + ")" : ""}, ${modeLabel(p.mode)}`, p, lines });
+}
+function addCurrent() {
+    const p = readParams(); if (!p) return;
+    addToBasket(p, currentLines(p)); saveBasket();
+}
+function addVariants() {
+    const p = readParams(); if (!p) return;
+    ["centered", "edge"].forEach(m => [1, 2, 3].forEach(l => {
+        if (l <= p.n) addToBasket({ ...p, mode: m }, l);
+    }));
+    saveBasket();
+}
+function renameItem(i, v) { basket[i].name = v; saveBasket(); }
+function removeItem(i) { basket.splice(i, 1); saveBasket(); }
+function clearBasket() { basket = []; saveBasket(); }
+function loadItem(i) {
+    const { p, lines } = basket[i];
+    const set = (id, v) => document.getElementById(id).value = v;
+    set("width", p.W); set("length", p.L); set("height", p.H); set("workplane", p.hp);
+    set("spots", p.n); set("angle", p.angle); set("lumens", p.lm);
+    set("mode", p.mode); set("userRows", String(lines));
+    document.getElementById("showHeat").checked = p.heat;
+    calculate();
+}
+function renderBasket() {
+    const el = document.getElementById("basket");
+    if (!basket.length) {
+        el.innerHTML = '<p style="color:#666;margin:6px 0">Panier vide : le rapport portera sur la configuration affichée.</p>';
+        return;
     }
-
-    const row1 = spots.filter(p => Math.abs(p.y - first.y) < 1e-3);
-    const row2 = spots.filter(p => Math.abs(p.y - first.y) > 1e-3);
-
-    if (row1.length && row2.length) {
-        const p1 = row1[0];
-        const p2 = row2[0];
-        const yA = offsetYCanvas + p1.y * scale;
-        const yB = offsetYCanvas + p2.y * scale;
-        drawDimensionLine(ctx, x1, yA, x1, yB, spacingY.toFixed(2) + " m");
-    }
+    el.innerHTML = basket.map((b, i) => `<div class="bitem">
+        <input value="${esc(b.name)}" onchange="renameItem(${i}, this.value)">
+        <button onclick="loadItem(${i})" title="Recharger dans le formulaire">Charger</button>
+        <button onclick="removeItem(${i})" title="Retirer">✕</button></div>`).join("") +
+        '<button onclick="clearBasket()">Vider le panier</button>';
 }
 
-// --- SURVOL GLOBAL (UN SEUL LISTENER) ---
-document.getElementById("canvas").addEventListener("mousemove", function(e) {
-    if (!lastSpots) return;
+// ---------- Rapport PDF ----------
+function renderImage(lay, radius) {
+    const c = document.createElement("canvas");
+    draw(c, lay, radius, null, 3);
+    return c.toDataURL("image/png");
+}
 
+function exportPDF() {
+    if (!window.jspdf) { alert("Bibliothèque PDF non chargée (connexion internet requise)."); return; }
+    let items = basket;
+    if (!items.length) {
+        const p = readParams(); if (!p) return;
+        items = [{ name: "Configuration retenue", p, lines: currentLines(p) }];
+    }
+    const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+    items.forEach((it, i) => {
+        if (i > 0) doc.addPage();
+        const p = it.p, lay = layout(p, it.lines, p.mode);
+        doc.setFontSize(16); doc.text("Rapport de disposition de spots", 15, 18);
+        doc.setFontSize(10); doc.text(new Date().toLocaleDateString("fr-FR"), 195, 18, { align: "right" });
+        doc.setFontSize(12); doc.text(it.name, 15, 28);
+        doc.addImage(renderImage(lay, p.radius), "PNG", 15, 33, 170, 116);
+
+        let y = 160;
+        doc.setFontSize(10);
+        const { rows, warns } = info(p, lay);
+        [
+            ["Mode", p.mode === "centered" ? "Espacement identique (centré)" : "Écartement E/2 du mur"],
+            ["Pièce", `${p.W.toFixed(2)} x ${p.L.toFixed(2)} m, hauteur ${p.H.toFixed(2)} m, plan de travail ${p.hp.toFixed(2)} m`],
+            ["Spots", `${p.n} spots, ${p.angle}° de diffusion, ${p.lm} lm/spot`],
+            ...rows
+        ].forEach(([k, v]) => {
+            const lines = doc.splitTextToSize(`${k} : ${v}`, 180);
+            doc.text(lines, 15, y); y += 5.5 * lines.length;
+        });
+        doc.setTextColor(180, 83, 9);
+        warns.forEach(w => {
+            const lines = doc.splitTextToSize("Attention : " + w, 180);
+            doc.text(lines, 15, y); y += 5.5 * lines.length;
+        });
+        doc.setTextColor(0);
+        doc.setFontSize(8); doc.text(`${i + 1} / ${items.length}`, 195, 290, { align: "right" });
+    });
+    doc.save("rapport-spots.pdf");
+}
+
+// ---------- Survol ----------
+const cvs = document.getElementById("canvas");
+cvs.addEventListener("mousemove", function (e) {
+    if (!lastLay) return;
     const rect = this.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    hoveredSpot = null;
-
-    lastSpots.forEach(s => {
-        const x = lastOffsetXCanvas + s.x * lastScale;
-        const y = lastOffsetYCanvas + s.y * lastScale;
-
-        const dist = Math.sqrt((mouseX - x)**2 + (mouseY - y)**2);
-
-        if (dist < lastRadius * lastScale) {
-            hoveredSpot = s;
-        }
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    hovered = null;
+    lastLay.pts.forEach(s => {
+        const d = Math.hypot(mx - (lastView.ox + s.x * lastView.sc), my - (lastView.oy + s.y * lastView.sc));
+        if (d < lastRadius * lastView.sc) hovered = s;
     });
-
-    draw(lastWidth, lastLength, lastSpots, lastRadius, lastSpacingX, lastSpacingY, lastOffsetX, lastOffsetY, hoveredSpot);
+    mouse = { x: mx, y: my };
+    draw(this, lastLay, lastRadius, hovered, undefined, mouse);
+});
+cvs.addEventListener("mouseleave", function () {
+    if (!lastLay) return;
+    hovered = null; mouse = null;
+    draw(this, lastLay, lastRadius, null);
 });
 
+// Recalcul automatique à chaque modification
+document.querySelectorAll("#params input, #params select").forEach(el => el.addEventListener("change", calculate));
+renderBasket();
+calculate();
 </script>
-
 </body>
 </html>
